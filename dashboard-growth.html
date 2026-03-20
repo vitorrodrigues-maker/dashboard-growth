@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard Growth - Aquisicao & Ativacao</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+  * { font-family: 'Inter', sans-serif; }
+  body { background: #0f1117; color: #e2e8f0; }
+  .glass { background: rgba(30, 33, 48, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.06); }
+  .tab-active { background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); color: white; }
+  .tab-inactive { background: rgba(30, 33, 48, 0.5); color: #94a3b8; }
+  .tab-inactive:hover { background: rgba(50, 53, 68, 0.7); color: #e2e8f0; }
+  .heatmap-cell { transition: all 0.15s ease; }
+  .heatmap-cell:hover { transform: scale(1.08); z-index: 10; box-shadow: 0 0 12px rgba(99,102,241,0.4); }
+  .prob-alta { background: rgba(34,197,94,0.15); color: #4ade80; border-left: 3px solid #22c55e; }
+  .prob-media { background: rgba(250,204,21,0.12); color: #facc15; border-left: 3px solid #eab308; }
+  .prob-baixa { background: rgba(239,68,68,0.12); color: #f87171; border-left: 3px solid #ef4444; }
+  .prob-realizada { background: rgba(59,130,246,0.12); color: #60a5fa; border-left: 3px solid #3b82f6; }
+  table { border-collapse: separate; border-spacing: 0; }
+  th { position: sticky; top: 0; z-index: 5; }
+  .scroll-container { max-height: 520px; overflow-y: auto; }
+  .scroll-container::-webkit-scrollbar { width: 6px; }
+  .scroll-container::-webkit-scrollbar-track { background: transparent; }
+  .scroll-container::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+  .fade-in { animation: fadeIn 0.3s ease-in; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .kpi-card { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+  .kpi-card:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,0,0,0.3); }
+  .section-title { position: relative; padding-left: 12px; }
+  .section-title::before { content: ''; position: absolute; left: 0; top: 4px; bottom: 4px; width: 3px; border-radius: 2px; background: linear-gradient(180deg, #6366f1, #8b5cf6); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner { width: 40px; height: 40px; border: 3px solid rgba(99,102,241,0.2); border-top-color: #6366f1; border-radius: 50%; animation: spin 0.8s linear infinite; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- Loading Overlay -->
+<div id="loadingOverlay" class="fixed inset-0 bg-[#0f1117] z-50 flex flex-col items-center justify-center gap-4">
+  <div class="spinner"></div>
+  <p class="text-slate-400 text-sm" id="loadingMsg">Carregando dados do Google Sheets...</p>
+</div>
+
+<!-- Error Banner (hidden by default) -->
+<div id="errorBanner" class="hidden px-6 py-3 bg-red-500/10 border-b border-red-500/20">
+  <p class="text-red-400 text-sm" id="errorMsg"></p>
+</div>
+
+<header class="border-b border-white/5 px-6 py-4 flex items-center justify-between">
+  <div>
+    <h1 class="text-xl font-bold text-white">Growth Dashboard</h1>
+    <p class="text-sm text-slate-400" id="headerSubtitle">Aquisicao & Ativacao</p>
+  </div>
+  <div class="flex items-center gap-3">
+    <button onclick="loadAllData()" class="text-xs text-indigo-400 hover:text-indigo-300 border border-indigo-500/30 px-3 py-1 rounded-lg transition-colors">Atualizar</button>
+    <span class="text-xs text-slate-500">Atualizado em</span>
+    <span class="text-xs font-mono text-indigo-400" id="lastUpdate">--</span>
+  </div>
+</header>
+
+<nav class="px-6 pt-4 flex gap-2">
+  <button onclick="switchTab('aquisicao')" id="tab-aquisicao" class="tab-active px-5 py-2 rounded-lg text-sm font-semibold transition-all">Aquisicao</button>
+  <button onclick="switchTab('ativacao')" id="tab-ativacao" class="tab-inactive px-5 py-2 rounded-lg text-sm font-semibold transition-all">Ativacao</button>
+</nav>
+
+<!-- ========== AQUISICAO ========== -->
+<main id="panel-aquisicao" class="px-6 py-5 space-y-6 fade-in">
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4" id="kpiAquisicao"></div>
+
+  <section>
+    <h2 class="section-title text-base font-semibold text-white mb-3">Funil Cohort Production</h2>
+    <div class="glass rounded-xl overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-xs text-slate-400 uppercase tracking-wide bg-slate-800/60">
+              <th class="text-left px-4 py-3">Etapa</th>
+              <th class="text-right px-3 py-3">Entrada</th>
+              <th class="text-right px-3 py-3">Avancou</th>
+              <th class="text-right px-3 py-3">Perdido</th>
+              <th class="text-right px-3 py-3">Parado</th>
+              <th class="text-right px-3 py-3">Target</th>
+              <th class="text-right px-3 py-3">Trend</th>
+              <th class="text-right px-3 py-3">% Target</th>
+              <th class="text-right px-3 py-3">CVR</th>
+              <th class="text-right px-3 py-3">Win Rate</th>
+              <th class="text-right px-3 py-3">Target CVR</th>
+              <th class="text-right px-4 py-3">% Target CVR</th>
+            </tr>
+          </thead>
+          <tbody id="funnelBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <section>
+      <h2 class="section-title text-base font-semibold text-white mb-3">Pipeline Aquecido</h2>
+      <div class="glass rounded-xl overflow-hidden scroll-container">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-xs text-slate-400 uppercase tracking-wide bg-slate-800/60">
+              <th class="text-left px-4 py-3">Deal</th>
+              <th class="text-left px-3 py-3">Prob.</th>
+              <th class="text-left px-3 py-3">Stage</th>
+              <th class="text-left px-3 py-3">Closer</th>
+              <th class="text-right px-3 py-3">ONB Prev.</th>
+              <th class="text-right px-4 py-3">Dias</th>
+            </tr>
+          </thead>
+          <tbody id="pipelineBody"></tbody>
+        </table>
+      </div>
+    </section>
+    <section>
+      <h2 class="section-title text-base font-semibold text-white mb-3">Origens dos ONBs</h2>
+      <div class="glass rounded-xl p-5" style="height:340px">
+        <canvas id="sourcesChart"></canvas>
+      </div>
+    </section>
+  </div>
+
+  <section>
+    <h2 class="section-title text-base font-semibold text-white mb-3">Performance Individual - Closers (ONBs)</h2>
+    <div class="grid grid-cols-1 md:grid-cols-5 gap-4" id="closerCards"></div>
+  </section>
+
+  <section>
+    <h2 class="section-title text-base font-semibold text-white mb-3">Agendamentos (SAL) vs Meta MTD</h2>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div class="glass rounded-xl p-5" style="height:320px">
+        <canvas id="sdrChart"></canvas>
+      </div>
+      <div class="glass rounded-xl overflow-hidden">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-xs text-slate-400 uppercase tracking-wide bg-slate-800/60">
+              <th class="text-left px-4 py-3">SDR</th>
+              <th class="text-right px-3 py-3">Agendamentos</th>
+              <th class="text-right px-3 py-3">Meta MTD</th>
+              <th class="text-right px-4 py-3">Atingimento</th>
+            </tr>
+          </thead>
+          <tbody id="sdrBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- ========== ATIVACAO ========== -->
+<main id="panel-ativacao" class="px-6 py-5 space-y-6 fade-in hidden">
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4" id="kpiAtivacao"></div>
+
+  <section>
+    <h2 class="section-title text-base font-semibold text-white mb-3">Taxa de Ativacao por Cohort (1+ pedido)</h2>
+    <div class="glass rounded-xl overflow-hidden">
+      <div class="overflow-x-auto scroll-container">
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="text-[10px] text-slate-400 uppercase tracking-wide bg-slate-800/60">
+              <th class="text-left px-3 py-2">Turma</th><th class="text-left px-2 py-2">Semana</th>
+              <th class="text-right px-2 py-2">ONB</th><th class="text-right px-2 py-2">Meta</th>
+              <th class="text-right px-2 py-2">Churn W8</th>
+              <th class="text-center px-2 py-2">W0</th><th class="text-center px-2 py-2">W1</th>
+              <th class="text-center px-2 py-2">W2</th><th class="text-center px-2 py-2">W3</th>
+              <th class="text-center px-2 py-2">W4</th><th class="text-center px-2 py-2">W5</th>
+              <th class="text-center px-2 py-2">W6</th><th class="text-center px-2 py-2">W7</th>
+              <th class="text-center px-3 py-2">W8</th>
+            </tr>
+          </thead>
+          <tbody id="activationBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="section-title text-base font-semibold text-white mb-3">Taxa de Engajamento por Cohort (4+ pedidos / ativados)</h2>
+    <div class="glass rounded-xl overflow-hidden">
+      <div class="overflow-x-auto scroll-container">
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="text-[10px] text-slate-400 uppercase tracking-wide bg-slate-800/60">
+              <th class="text-left px-3 py-2">Turma</th><th class="text-left px-2 py-2">Semana</th>
+              <th class="text-right px-2 py-2">Ativados</th>
+              <th class="text-right px-2 py-2">Meta</th>
+              <th class="text-right px-2 py-2">Churn W8</th>
+              <th class="text-center px-2 py-2">W0</th><th class="text-center px-2 py-2">W1</th>
+              <th class="text-center px-2 py-2">W2</th><th class="text-center px-2 py-2">W3</th>
+              <th class="text-center px-2 py-2">W4</th><th class="text-center px-2 py-2">W5</th>
+              <th class="text-center px-2 py-2">W6</th><th class="text-center px-2 py-2">W7</th>
+              <th class="text-center px-3 py-2">W8</th>
+            </tr>
+          </thead>
+          <tbody id="engagementBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="section-title text-base font-semibold text-white mb-3">Evolucao da Ativacao W8 por Turma</h2>
+    <p class="text-xs text-slate-500 mb-2 pl-3">Pontos vazios com linha tracejada = turma ainda nao completou W8 (exibindo ultimo valor disponivel)</p>
+    <div class="glass rounded-xl p-5" style="height:420px">
+      <canvas id="actW8Chart"></canvas>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="section-title text-base font-semibold text-white mb-3">Ativacao Mensal (W0-W4) - Perspectiva por Mes</h2>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div class="glass rounded-xl p-5" style="height:420px">
+        <canvas id="monthlyActChart"></canvas>
+      </div>
+      <div class="glass rounded-xl overflow-hidden">
+        <div class="overflow-x-auto scroll-container">
+          <table class="w-full text-xs">
+            <thead>
+              <tr class="text-[10px] text-slate-400 uppercase tracking-wide bg-slate-800/60">
+                <th class="text-left px-3 py-2">Mes</th><th class="text-right px-2 py-2">ONB</th>
+                <th class="text-right px-2 py-2">Churn W4</th><th class="text-right px-2 py-2">Churn %</th>
+                <th class="text-center px-2 py-2">W0</th><th class="text-center px-2 py-2">W1</th>
+                <th class="text-center px-2 py-2">W2</th><th class="text-center px-2 py-2">W3</th>
+                <th class="text-center px-3 py-2">W4</th>
+              </tr>
+            </thead>
+            <tbody id="monthlyActBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+Chart.register(ChartDataLabels);
+Chart.defaults.set('plugins.datalabels', { display: false });
+
+const dlPct = { display: ctx => ctx.dataset.data[ctx.dataIndex] != null, color: '#cbd5e1', font: { size: 10, weight: 600 }, anchor: 'end', align: 'top', offset: 2, formatter: v => v != null ? Math.round(v) + '%' : '' };
+const dlNone = { display: false };
+
+// ===== Google Sheets Config =====
+const SHEET_ID = '1DkBDSa4urpVcpY7yHjcm6pZ-cw3XUa1N-LS_4NmaVHM';
+const SHEETS = ['funil','pipeline','origens','closers_onb','agendamentos_sal','ativacao_cohort','engajamento_cohort','ativacao_mensal'];
+
+let funnelData=[], pipelineData=[], sourcesData=[], closerData=[], sdrData=[], activationData=[], engagementData=[], monthlyActivation=[];
+let chartInstances = {};
+
+function normalizeHeader(h) {
+  return h.trim().toLowerCase()
+    .replace(/^%_/, 'pct_')
+    .replace(/__%/g, '_pct')
+    .replace(/-/g, '_')
+    .replace(/\s+/g, '_');
+}
+
+function processValue(val) {
+  if (val == null) return null;
+  if (val instanceof Date) {
+    return val.getFullYear() + '-' + String(val.getMonth()+1).padStart(2,'0') + '-' + String(val.getDate()).padStart(2,'0');
+  }
+  if (typeof val === 'number') return val;
+  if (typeof val === 'boolean') return val;
+  const s = String(val).trim();
+  if (s === '') return null;
+  const fixed = s.replace(/(\d),(\d)/g, '$1.$2');
+  if (fixed.endsWith('%')) { const num = parseFloat(fixed.slice(0,-1)); return isNaN(num) ? s : num / 100; }
+  const num = Number(fixed);
+  if (!isNaN(num) && fixed !== '') return num;
+  return s;
+}
+
+function fetchSheet(name) {
+  return new Promise((resolve, reject) => {
+    const cb = '_gviz_' + name.replace(/\W/g,'') + '_' + Date.now();
+    const script = document.createElement('script');
+    let done = false;
+
+    const timer = setTimeout(() => {
+      if (!done) { done = true; cleanup(); reject(new Error('Timeout (15s)')); }
+    }, 15000);
+
+    function cleanup() {
+      clearTimeout(timer);
+      delete window[cb];
+      if (script.parentNode) script.parentNode.removeChild(script);
+    }
+
+    window[cb] = function(response) {
+      if (done) return;
+      done = true;
+      cleanup();
+      if (response.status === 'error') {
+        reject(new Error(response.errors ? response.errors.map(e => e.detailed_message || e.message).join(', ') : 'Erro desconhecido'));
+        return;
+      }
+      const table = response.table;
+      const headers = table.cols.map(c => normalizeHeader(c.label));
+      const rows = [];
+      for (const row of table.rows) {
+        const obj = {};
+        for (let c = 0; c < headers.length; c++) {
+          const cell = row.c && row.c[c] ? row.c[c] : null;
+          obj[headers[c]] = cell ? processValue(cell.v) : null;
+        }
+        rows.push(obj);
+      }
+      resolve(rows);
+    };
+
+    script.onerror = () => {
+      if (!done) { done = true; cleanup(); reject(new Error('Erro de rede')); }
+    };
+
+    script.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?sheet=${encodeURIComponent(name)}&tqx=responseHandler:${cb}`;
+    document.body.appendChild(script);
+  });
+}
+
+// ===== Helpers =====
+function pct(v) { return v == null ? '-' : (v * 100).toFixed(0) + '%'; }
+function fmtDate(d) { if (!d) return '-'; const dt = new Date(d); return isNaN(dt) ? d : dt.toLocaleDateString('pt-BR', {day:'2-digit',month:'2-digit'}); }
+function fmtWeek(d) { if (!d) return '-'; const dt = new Date(d); return isNaN(dt) ? d : dt.toLocaleDateString('pt-BR', {day:'2-digit',month:'2-digit',year:'2-digit'}); }
+function n(v) { return v == null ? 0 : Number(v); }
+function targetColor(val) { return val >= 100 ? 'text-green-400' : val >= 80 ? 'text-yellow-400' : 'text-red-400'; }
+
+function heatColor(val, meta) {
+  if (val == null) return 'bg-slate-800/40 text-slate-600';
+  const ratio = val / meta;
+  if (ratio >= 1.0) return 'bg-green-500/25 text-green-300';
+  if (ratio >= 0.8) return 'bg-emerald-500/20 text-emerald-300';
+  if (ratio >= 0.6) return 'bg-yellow-500/15 text-yellow-300';
+  if (ratio >= 0.4) return 'bg-orange-500/15 text-orange-300';
+  if (ratio >= 0.2) return 'bg-red-500/12 text-red-300';
+  return 'bg-red-500/8 text-red-400';
+}
+
+function switchTab(tab) {
+  document.getElementById('panel-aquisicao').classList.toggle('hidden', tab !== 'aquisicao');
+  document.getElementById('panel-ativacao').classList.toggle('hidden', tab !== 'ativacao');
+  document.getElementById('tab-aquisicao').className = tab === 'aquisicao' ? 'tab-active px-5 py-2 rounded-lg text-sm font-semibold transition-all' : 'tab-inactive px-5 py-2 rounded-lg text-sm font-semibold transition-all';
+  document.getElementById('tab-ativacao').className = tab === 'ativacao' ? 'tab-active px-5 py-2 rounded-lg text-sm font-semibold transition-all' : 'tab-inactive px-5 py-2 rounded-lg text-sm font-semibold transition-all';
+}
+
+function destroyCharts() { Object.values(chartInstances).forEach(c => c.destroy()); chartInstances = {}; }
+
+// ===== KPI Renders =====
+function renderKpiAquisicao() {
+  const lead = funnelData.find(r => r.etapa === 'LEAD') || {};
+  const onb = funnelData.find(r => r.etapa === 'ONB') || {};
+  const pipeCount = pipelineData.length;
+  const altaCount = pipelineData.filter(r => (r.probabilidade || '').toUpperCase() === 'ALTA').length;
+
+  const kpi = document.getElementById('kpiAquisicao');
+  kpi.innerHTML = `
+    <div class="glass rounded-xl p-4 kpi-card">
+      <p class="text-xs text-slate-400 uppercase tracking-wide">Leads</p>
+      <p class="text-2xl font-bold text-white mt-1">${n(lead.entrada)}</p>
+      <div class="flex items-center gap-1 mt-1">
+        <span class="text-xs ${targetColor(n(lead.pct_target))}">Trend ${n(lead.trend)}</span>
+        <span class="text-[10px] text-slate-500">/ ${n(lead.target)} target</span>
+      </div>
+      <div class="w-full bg-slate-700/50 rounded-full h-1.5 mt-2"><div class="h-1.5 rounded-full ${targetColor(n(lead.pct_target)).replace('text-','bg-')}" style="width:${Math.min(100,n(lead.pct_target))}%"></div></div>
+      <p class="text-[10px] text-slate-500 mt-1">${n(lead.pct_target)}% do target</p>
+    </div>
+    <div class="glass rounded-xl p-4 kpi-card">
+      <p class="text-xs text-slate-400 uppercase tracking-wide">ONBs Realizados</p>
+      <p class="text-2xl font-bold text-white mt-1">${n(onb.entrada)}</p>
+      <div class="flex items-center gap-1 mt-1">
+        <span class="text-xs ${targetColor(n(onb.pct_target))}">Trend ${n(onb.trend)}</span>
+        <span class="text-[10px] text-slate-500">/ ${n(onb.target)} target</span>
+      </div>
+      <div class="w-full bg-slate-700/50 rounded-full h-1.5 mt-2"><div class="h-1.5 rounded-full ${targetColor(n(onb.pct_target)).replace('text-','bg-')}" style="width:${Math.min(100,n(onb.pct_target))}%"></div></div>
+      <p class="text-[10px] ${targetColor(n(onb.pct_target))} mt-1">${n(onb.pct_target)}% do target</p>
+    </div>
+    <div class="glass rounded-xl p-4 kpi-card">
+      <p class="text-xs text-slate-400 uppercase tracking-wide">Pipeline Ativo</p>
+      <p class="text-2xl font-bold text-white mt-1">${pipeCount}</p>
+      <div class="flex items-center gap-1 mt-1">
+        <span class="text-xs text-green-400">${altaCount} alta prob.</span>
+        <span class="text-[10px] text-slate-500">${pipeCount - altaCount} media/baixa</span>
+      </div>
+    </div>
+    <div class="glass rounded-xl p-4 kpi-card">
+      <p class="text-xs text-slate-400 uppercase tracking-wide">CVR Lead->BC CPF</p>
+      <p class="text-2xl font-bold text-white mt-1">${n(lead.cvr)}%</p>
+      <div class="flex items-center gap-1 mt-1">
+        <span class="text-xs ${targetColor(n(lead.pct_target_cvr))}">${n(lead.pct_target_cvr)}% do target</span>
+      </div>
+      <div class="w-full bg-slate-700/50 rounded-full h-1.5 mt-2"><div class="h-1.5 rounded-full bg-green-400" style="width:${Math.min(100,n(lead.pct_target_cvr))}%"></div></div>
+      <p class="text-[10px] text-slate-500 mt-1">Target: ${n(lead.target_cvr)}%</p>
+    </div>`;
+}
+
+function renderKpiAtivacao() {
+  const latest = activationData[0] || {};
+  const w8vals = engagementData.filter(r => r.eng_w8 != null).map(r => r.eng_w8);
+  const avgEng = w8vals.length ? (w8vals.reduce((a,b) => a+b, 0) / w8vals.length * 100).toFixed(0) + '%' : '--';
+  const recent10 = activationData.filter(r => r.churn_rate_cap_w8 != null).slice(0, 10);
+  const avgChurn = recent10.length ? (recent10.reduce((a,b) => a + n(b.churn_rate_cap_w8), 0) / recent10.length * 100).toFixed(1) + '%' : '--';
+
+  document.getElementById('kpiAtivacao').innerHTML = `
+    <div class="glass rounded-xl p-4 kpi-card">
+      <p class="text-xs text-slate-400 uppercase tracking-wide">ONBs Semana Atual (T${n(latest.turma)})</p>
+      <p class="text-2xl font-bold text-white mt-1">${n(latest.onb)}</p>
+      <p class="text-xs text-slate-500 mt-1">Meta ativacao: 70%</p>
+    </div>
+    <div class="glass rounded-xl p-4 kpi-card">
+      <p class="text-xs text-slate-400 uppercase tracking-wide">Ativacao W0 (T${n(latest.turma)})</p>
+      <p class="text-2xl font-bold text-white mt-1">${pct(latest.act_w0)}</p>
+      <p class="text-xs text-yellow-400 mt-1">Turma recente</p>
+    </div>
+    <div class="glass rounded-xl p-4 kpi-card">
+      <p class="text-xs text-slate-400 uppercase tracking-wide">Engajamento W8 Medio</p>
+      <p class="text-2xl font-bold text-white mt-1">${avgEng}</p>
+      <p class="text-xs text-slate-500 mt-1">Meta: 80%</p>
+    </div>
+    <div class="glass rounded-xl p-4 kpi-card">
+      <p class="text-xs text-slate-400 uppercase tracking-wide">Churn W8 Medio</p>
+      <p class="text-2xl font-bold text-white mt-1">${avgChurn}</p>
+      <p class="text-xs text-slate-500 mt-1">Ultimas 10 turmas</p>
+    </div>`;
+}
+
+// ===== Render Functions =====
+function renderFunnel() {
+  document.getElementById('funnelBody').innerHTML = funnelData.map((r, i) => {
+    const bg = i % 2 === 0 ? 'bg-slate-800/20' : '';
+    const tc = targetColor(n(r.pct_target));
+    const tcc = targetColor(n(r.pct_target_cvr));
+    return `<tr class="${bg} hover:bg-slate-700/30 transition-colors">
+      <td class="px-4 py-2.5 font-semibold text-white text-xs">${r.etapa}</td>
+      <td class="px-3 py-2.5 text-right font-mono">${n(r.entrada)}</td>
+      <td class="px-3 py-2.5 text-right font-mono text-green-400">${n(r.avancou)}</td>
+      <td class="px-3 py-2.5 text-right font-mono text-red-400">${n(r.perdido)}</td>
+      <td class="px-3 py-2.5 text-right font-mono text-slate-400">${n(r.parado)}</td>
+      <td class="px-3 py-2.5 text-right font-mono text-slate-300">${n(r.target)}</td>
+      <td class="px-3 py-2.5 text-right font-mono text-indigo-300">${n(r.trend)}</td>
+      <td class="px-3 py-2.5 text-right font-mono font-semibold ${tc}">${n(r.pct_target)}%</td>
+      <td class="px-3 py-2.5 text-right font-mono">${r.cvr != null ? n(r.cvr) + '%' : '-'}</td>
+      <td class="px-3 py-2.5 text-right font-mono">${r.win_rate != null ? n(r.win_rate) + '%' : '-'}</td>
+      <td class="px-3 py-2.5 text-right font-mono text-slate-400">${n(r.target_cvr)}%</td>
+      <td class="px-4 py-2.5 text-right font-mono font-semibold ${tcc}">${n(r.pct_target_cvr)}%</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderPipeline() {
+  document.getElementById('pipelineBody').innerHTML = pipelineData.map(r => {
+    const p = (r.probabilidade || '').toUpperCase();
+    const pc = p === 'ALTA' ? 'prob-alta' : p === 'MÉDIA' || p === 'MEDIA' ? 'prob-media' : p === 'REALIZADA' ? 'prob-realizada' : 'prob-baixa';
+    return `<tr class="${pc} hover:brightness-125 transition-all">
+      <td class="px-4 py-2.5 font-medium text-xs max-w-[180px] truncate">${r.dealname || ''}</td>
+      <td class="px-3 py-2.5 text-xs font-semibold">${r.probabilidade || ''}</td>
+      <td class="px-3 py-2.5 text-xs text-slate-300">${r.stage_atual || ''}</td>
+      <td class="px-3 py-2.5 text-xs">${r.closer || ''}</td>
+      <td class="px-3 py-2.5 text-xs text-right font-mono">${fmtDate(r.onb_previsto)}</td>
+      <td class="px-4 py-2.5 text-xs text-right font-mono">${r.dias_na_etapa != null ? r.dias_na_etapa + 'd' : '-'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderSourcesChart() {
+  const sorted = [...sourcesData].sort((a, b) => n(b.total_onbs_weekly) - n(a.total_onbs_weekly));
+  const ctx = document.getElementById('sourcesChart').getContext('2d');
+  chartInstances.sources = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: sorted.map(s => s.source_category), datasets: [{ data: sorted.map(s => n(s.total_onbs_weekly)), backgroundColor: ['#6366f1','#8b5cf6','#a78bfa','#c4b5fd','#ddd6fe','#ede9fe','#f5f3ff'], borderRadius: 6, barThickness: 36 }] },
+    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { backgroundColor: '#1e2130', titleColor: '#e2e8f0', bodyColor: '#94a3b8', borderColor: '#334155', borderWidth: 1 }, datalabels: { display: true, color: '#e2e8f0', font: { size: 11, weight: 700 }, anchor: 'end', align: 'end', offset: 4 } }, scales: { x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#64748b', font: { size: 11 } } }, y: { grid: { display: false }, ticks: { color: '#cbd5e1', font: { size: 11 } } } } }
+  });
+}
+
+function renderClosers() {
+  document.getElementById('closerCards').innerHTML = closerData.map(c => {
+    const ating = (n(c.atingimento_mtd_vs_target || c.onb_atingimento_vs_target) * 100).toFixed(0);
+    const trendPct = (n(c.atingimento_trend_vs_target || c.onb_trend_vs_target) * 100).toFixed(0);
+    const barW = Math.min(100, parseFloat(ating));
+    const barColor = ating >= 100 ? 'bg-green-400' : ating >= 70 ? 'bg-yellow-400' : 'bg-red-400';
+    const textColor = ating >= 100 ? 'text-green-400' : ating >= 70 ? 'text-yellow-400' : 'text-red-400';
+    return `<div class="glass rounded-xl p-4 kpi-card">
+      <p class="text-sm font-semibold text-white">${c.atendente}</p>
+      <div class="mt-3 flex items-end justify-between"><div><p class="text-2xl font-bold text-white">${n(c.onb_realizado)}</p><p class="text-[10px] text-slate-500">de ${n(c.onb_meta)} meta</p></div><div class="text-right"><p class="text-sm font-semibold ${textColor}">${ating}%</p><p class="text-[10px] text-slate-500">atingimento</p></div></div>
+      <div class="w-full bg-slate-700/50 rounded-full h-1.5 mt-3"><div class="${barColor} h-1.5 rounded-full transition-all" style="width:${barW}%"></div></div>
+      <div class="flex justify-between mt-2"><span class="text-[10px] text-indigo-300">Trend: ${n(c.onb_trend_quartas)}</span><span class="text-[10px] text-slate-400">Trend vs Target: ${trendPct}%</span></div>
+    </div>`;
+  }).join('');
+}
+
+function renderSDR() {
+  const sorted = [...sdrData].sort((a, b) => n(b.atingimento_mtd) - n(a.atingimento_mtd));
+  const colors = sorted.map(s => n(s.atingimento_mtd) >= 1.0 ? '#22c55e' : n(s.atingimento_mtd) >= 0.7 ? '#eab308' : '#ef4444');
+  const ctx = document.getElementById('sdrChart').getContext('2d');
+  chartInstances.sdr = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: sorted.map(s => s.atendente), datasets: [
+      { label: 'Agendamentos', data: sorted.map(s => n(s.agendamentos)), backgroundColor: colors.map(c => c + '40'), borderColor: colors, borderWidth: 1.5, borderRadius: 6, barThickness: 28, datalabels: { display: true, color: '#e2e8f0', font: { size: 11, weight: 700 }, anchor: 'end', align: 'end', offset: 4 } },
+      { label: 'Meta MTD', data: sorted.map(s => Math.round(n(s.meta_mtd))), backgroundColor: 'rgba(148,163,184,0.15)', borderColor: 'rgba(148,163,184,0.4)', borderWidth: 1, borderRadius: 6, barThickness: 28, datalabels: { display: true, color: '#94a3b8', font: { size: 10 }, anchor: 'end', align: 'end', offset: 4 } }
+    ] },
+    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#94a3b8', font: { size: 11 } } }, tooltip: { backgroundColor: '#1e2130', titleColor: '#e2e8f0', bodyColor: '#94a3b8', borderColor: '#334155', borderWidth: 1 } }, scales: { x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#64748b' } }, y: { grid: { display: false }, ticks: { color: '#cbd5e1', font: { size: 12, weight: 600 } } } } }
+  });
+
+  document.getElementById('sdrBody').innerHTML = sorted.map((s, i) => {
+    const bg = i % 2 === 0 ? 'bg-slate-800/20' : '';
+    const ating = (n(s.atingimento_mtd) * 100).toFixed(0);
+    const tc = n(s.atingimento_mtd) >= 1.0 ? 'text-green-400' : n(s.atingimento_mtd) >= 0.7 ? 'text-yellow-400' : 'text-red-400';
+    const barW = Math.min(100, parseFloat(ating));
+    const barColor = n(s.atingimento_mtd) >= 1.0 ? 'bg-green-400' : n(s.atingimento_mtd) >= 0.7 ? 'bg-yellow-400' : 'bg-red-400';
+    return `<tr class="${bg} hover:bg-slate-700/30 transition-colors"><td class="px-4 py-3 font-semibold text-white">${s.atendente}</td><td class="px-3 py-3 text-right font-mono text-lg">${n(s.agendamentos)}</td><td class="px-3 py-3 text-right font-mono text-slate-400">${Math.round(n(s.meta_mtd))}</td><td class="px-4 py-3 text-right"><div class="flex items-center justify-end gap-2"><div class="w-16 bg-slate-700/50 rounded-full h-1.5"><div class="${barColor} h-1.5 rounded-full" style="width:${barW}%"></div></div><span class="font-mono font-semibold ${tc}">${ating}%</span></div></td></tr>`;
+  }).join('');
+}
+
+function renderActivation() {
+  const weeks = ['act_w0','act_w1','act_w2','act_w3','act_w4','act_w5','act_w6','act_w7','act_w8'];
+  document.getElementById('activationBody').innerHTML = activationData.map((r, i) => {
+    const bg = i % 2 === 0 ? 'bg-slate-800/20' : '';
+    const churnColor = n(r.churn_rate_cap_w8) > 0.25 ? 'text-red-400' : n(r.churn_rate_cap_w8) > 0.1 ? 'text-yellow-400' : 'text-green-400';
+    const cells = weeks.map(w => { const v = r[w]; return `<td class="px-2 py-2 text-center font-mono heatmap-cell ${heatColor(v, n(r.meta) || 0.7)} rounded">${pct(v)}</td>`; }).join('');
+    return `<tr class="${bg}"><td class="px-3 py-2 font-semibold text-white">T${n(r.turma)}</td><td class="px-2 py-2 font-mono text-slate-400">${fmtWeek(r.semana)}</td><td class="px-2 py-2 text-right font-mono">${n(r.onb)}</td><td class="px-2 py-2 text-right font-mono text-indigo-300">${pct(r.meta)}</td><td class="px-2 py-2 text-right font-mono ${churnColor}">${pct(r.churn_rate_cap_w8)}</td>${cells}</tr>`;
+  }).join('');
+}
+
+function renderEngagement() {
+  const weeks = ['eng_w0','eng_w1','eng_w2','eng_w3','eng_w4','eng_w5','eng_w6','eng_w7','eng_w8'];
+  document.getElementById('engagementBody').innerHTML = engagementData.map((r, i) => {
+    const bg = i % 2 === 0 ? 'bg-slate-800/20' : '';
+    const c8c = n(r.churn_rate_cap_w8) > 0.25 ? 'text-red-400' : n(r.churn_rate_cap_w8) > 0.1 ? 'text-yellow-400' : 'text-green-400';
+    const cells = weeks.map(w => { const v = r[w]; return `<td class="px-2 py-2 text-center font-mono heatmap-cell ${heatColor(v, n(r.meta) || 0.8)} rounded">${pct(v)}</td>`; }).join('');
+    return `<tr class="${bg}"><td class="px-3 py-2 font-semibold text-white">T${n(r.turma)}</td><td class="px-2 py-2 font-mono text-slate-400">${fmtWeek(r.semana)}</td><td class="px-2 py-2 text-right font-mono text-cyan-300">${n(r.ativados)}</td><td class="px-2 py-2 text-right font-mono text-indigo-300">${pct(r.meta)}</td><td class="px-2 py-2 text-right font-mono ${c8c}">${pct(r.churn_rate_cap_w8)}</td>${cells}</tr>`;
+  }).join('');
+}
+
+function renderActW8Chart() {
+  const allData = [...activationData].reverse();
+  const labels = allData.map(r => 'T' + n(r.turma));
+  const w8Complete = [], w8Incomplete = [], latestWeekLabel = [];
+  allData.forEach(r => {
+    if (r.act_w8 != null) { w8Complete.push((r.act_w8 * 100).toFixed(1)); w8Incomplete.push(null); latestWeekLabel.push('W8'); }
+    else {
+      w8Complete.push(null);
+      const wk = ['act_w7','act_w6','act_w5','act_w4','act_w3','act_w2','act_w1','act_w0'];
+      const wl = ['W7','W6','W5','W4','W3','W2','W1','W0'];
+      let found = false;
+      for (let i = 0; i < wk.length; i++) { if (r[wk[i]] != null) { w8Incomplete.push((r[wk[i]] * 100).toFixed(1)); latestWeekLabel.push(wl[i]); found = true; break; } }
+      if (!found) { w8Incomplete.push(null); latestWeekLabel.push('-'); }
+    }
+  });
+  const ctx = document.getElementById('actW8Chart').getContext('2d');
+  chartInstances.actW8 = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [
+      { label: 'Ativacao W8 (completa)', data: w8Complete, borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.1)', fill: true, tension: 0.3, pointRadius: 5, pointBackgroundColor: '#6366f1', pointBorderColor: '#6366f1', spanGaps: false, datalabels: { ...dlPct, color: '#a5b4fc' } },
+      { label: 'Em andamento (ultimo W disponivel)', data: w8Incomplete, borderColor: 'rgba(139,92,246,0.5)', borderDash: [5,5], backgroundColor: 'rgba(139,92,246,0.05)', fill: false, tension: 0.3, pointRadius: 6, pointBackgroundColor: 'transparent', pointBorderColor: '#a78bfa', pointBorderWidth: 2, spanGaps: false, datalabels: { ...dlPct, color: '#c4b5fd' } },
+      { label: 'Meta (70%)', data: allData.map(() => 70), borderColor: 'rgba(239,68,68,0.5)', borderDash: [6,4], pointRadius: 0, fill: false, datalabels: dlNone }
+    ] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#94a3b8', font: { size: 11 } } }, tooltip: { backgroundColor: '#1e2130', titleColor: '#e2e8f0', bodyColor: '#94a3b8', borderColor: '#334155', borderWidth: 1, callbacks: { afterLabel: ctx => { if (ctx.datasetIndex === 1 && latestWeekLabel[ctx.dataIndex]) return 'Dado de: ' + latestWeekLabel[ctx.dataIndex]; return ''; } } } }, scales: { x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#64748b', font: { size: 10 } } }, y: { min: 0, max: 100, grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#64748b', callback: v => v + '%' } } } }
+  });
+}
+
+function renderMonthlyActivation() {
+  const data = monthlyActivation.filter(r => r.mes >= '2025-05-01');
+  const labels = data.map(r => { const d = new Date(r.mes); return isNaN(d) ? r.mes : d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }); });
+  const ctx = document.getElementById('monthlyActChart').getContext('2d');
+  chartInstances.monthly = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: [
+      { type: 'bar', label: 'ONBs', data: data.map(r => n(r.onb)), backgroundColor: 'rgba(99,102,241,0.25)', borderColor: '#6366f1', borderWidth: 1, borderRadius: 4, yAxisID: 'y1', order: 2, datalabels: { display: true, color: '#a5b4fc', font: { size: 9, weight: 600 }, anchor: 'end', align: 'top', offset: 2 } },
+      { type: 'line', label: 'ACT W4 %', data: data.map(r => r.act_w4 != null ? (r.act_w4 * 100).toFixed(1) : null), borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.1)', pointRadius: 4, pointBackgroundColor: '#22c55e', tension: 0.3, fill: false, yAxisID: 'y', order: 1, datalabels: { ...dlPct, color: '#4ade80', font: { size: 9, weight: 600 } } },
+      { type: 'line', label: 'Meta (70%)', data: data.map(() => 70), borderColor: 'rgba(239,68,68,0.4)', borderDash: [6,4], pointRadius: 0, fill: false, yAxisID: 'y', order: 0, datalabels: dlNone }
+    ] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#94a3b8', font: { size: 10 } } }, tooltip: { backgroundColor: '#1e2130', titleColor: '#e2e8f0', bodyColor: '#94a3b8', borderColor: '#334155', borderWidth: 1 } }, scales: { x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#64748b', font: { size: 10 } } }, y: { position: 'left', min: 0, max: 100, grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#22c55e', callback: v => v + '%' }, title: { display: true, text: 'ACT W4 %', color: '#94a3b8' } }, y1: { position: 'right', min: 0, grid: { display: false }, ticks: { color: '#6366f1' }, title: { display: true, text: 'ONBs', color: '#94a3b8' } } } }
+  });
+
+  document.getElementById('monthlyActBody').innerHTML = [...data].reverse().map((r, i) => {
+    const bg = i % 2 === 0 ? 'bg-slate-800/20' : '';
+    const d = new Date(r.mes);
+    const mesLabel = isNaN(d) ? r.mes : d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
+    const churnColor = n(r.churn_rate_cap_w4) > 0.2 ? 'text-red-400' : n(r.churn_rate_cap_w4) > 0.1 ? 'text-yellow-400' : 'text-green-400';
+    const cells = ['act_w0','act_w1','act_w2','act_w3','act_w4'].map(w => { const v = r[w]; return `<td class="px-2 py-2 text-center font-mono heatmap-cell ${heatColor(v, 0.7)} rounded">${pct(v)}</td>`; }).join('');
+    return `<tr class="${bg}"><td class="px-3 py-2 font-semibold text-white">${mesLabel}</td><td class="px-2 py-2 text-right font-mono">${n(r.onb)}</td><td class="px-2 py-2 text-right font-mono text-red-300">${n(r.churn_cap_w4)}</td><td class="px-2 py-2 text-right font-mono ${churnColor}">${(n(r.churn_rate_cap_w4) * 100).toFixed(0)}%</td>${cells}</tr>`;
+  }).join('');
+}
+
+// ===== Main Loader =====
+async function loadAllData() {
+  const overlay = document.getElementById('loadingOverlay');
+  const msg = document.getElementById('loadingMsg');
+  const errBanner = document.getElementById('errorBanner');
+  const errMsg = document.getElementById('errorMsg');
+  overlay.classList.remove('hidden');
+  errBanner.classList.add('hidden');
+  msg.textContent = 'Carregando dados do Google Sheets...';
+
+  try {
+    destroyCharts();
+    const data = {};
+    const errors = [];
+    for (const name of SHEETS) {
+      msg.textContent = `Carregando ${name}...`;
+      try { data[name] = await fetchSheet(name); }
+      catch (err) { errors.push(`${name}: ${err.message}`); }
+    }
+
+    funnelData = data.funil || [];
+    pipelineData = data.pipeline || [];
+    sourcesData = data.origens || [];
+    closerData = data.closers_onb || [];
+    sdrData = data.agendamentos_sal || [];
+    activationData = data.ativacao_cohort || [];
+    engagementData = data.engajamento_cohort || [];
+    monthlyActivation = data.ativacao_mensal || [];
+
+    renderKpiAquisicao();
+    renderFunnel();
+    renderPipeline();
+    renderSourcesChart();
+    renderClosers();
+    renderSDR();
+    renderKpiAtivacao();
+    renderActivation();
+    renderEngagement();
+    renderActW8Chart();
+    renderMonthlyActivation();
+
+    document.getElementById('lastUpdate').textContent = new Date().toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+
+    if (errors.length) {
+      errMsg.textContent = 'Algumas abas falharam: ' + errors.join(' | ');
+      errBanner.classList.remove('hidden');
+    }
+  } catch (err) {
+    errMsg.textContent = 'Erro ao carregar dados: ' + err.message + '. Verifique se o Google Sheets esta compartilhado como "Qualquer pessoa com o link pode visualizar".';
+    errBanner.classList.remove('hidden');
+  } finally {
+    overlay.classList.add('hidden');
+  }
+}
+
+loadAllData();
+</script>
+</body>
+</html>
