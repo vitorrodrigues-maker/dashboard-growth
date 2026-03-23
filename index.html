@@ -330,7 +330,7 @@ function fetchSheet(name) {
       if (!done) { done = true; cleanup(); reject(new Error('Erro de rede')); }
     };
 
-    script.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?sheet=${encodeURIComponent(name)}&tqx=responseHandler:${cb}`;
+    script.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?sheet=${encodeURIComponent(name)}&headers=1&tqx=responseHandler:${cb}`;
     document.body.appendChild(script);
   });
 }
